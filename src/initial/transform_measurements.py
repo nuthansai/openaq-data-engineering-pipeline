@@ -1,21 +1,12 @@
 import csv
-import json
+from typing import Any, Generator, Iterable
 
 import ijson
-import pandas as pd
-from src.config import PROJECT_ROOT,DATA_DIR
-
-with open(DATA_DIR/'measurements_data.json', mode='rb') as f, open(DATA_DIR/'measurements.csv','w',newline = '', encoding='utf-8') as cf:
-    data = ijson.items(f,'item')
-
-# print(data[0]['sensor'][0]['measurements'][0]) # 1 measurement of a sensor of 1 location
-
-# print(data[0])
+from src.config import DATA_DIR
 
 
-    writer = None
-
-    for location in data:
+def transform(input_data: Iterable[dict]) -> Generator[dict[str, Any], Any, None]:
+    for location in input_data:
         for sensor in location["sensor"]:
             for measurement in sensor["measurements"]:
 
@@ -30,15 +21,20 @@ with open(DATA_DIR/'measurements_data.json', mode='rb') as f, open(DATA_DIR/'mea
                     "datetime": measurement["period"]["datetimeFrom"]["local"]
                 }
 
-                if writer is None:
-                    writer = csv.DictWriter(
-                        cf,
-                        fieldnames=measurement_dict.keys()
-                    )
-                    writer.writeheader()
+                yield measurement_dict
 
-                writer.writerow(measurement_dict)
 
+with open(DATA_DIR / 'measurements_data.json', mode='rb') as f, \
+        open(DATA_DIR / 'measurements5.csv', 'w', newline='', encoding='utf-8') as cf:
+    data = ijson.items(f, 'item')
+    result = transform(data)
+    writer = None
+
+    for result_dict in result:
+        if writer is None:
+            writer = csv.DictWriter(cf, fieldnames=result_dict.keys())
+            writer.writeheader()
+        writer.writerow(result_dict)
 # df = pd.DataFrame(measurements_list)
 
 # print(measurements_list)

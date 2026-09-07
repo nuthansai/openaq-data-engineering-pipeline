@@ -6,7 +6,7 @@ import pandas as pd
 import os
 from dotenv import load_dotenv
 from sqlalchemy.exc import SQLAlchemyError, ArgumentError
-from src.config import BASE_URL, HEADER_JSON, DATA_DIR, LOG_DIR
+from src.config import BASE_URL, HEADER_JSON, DATA_DIR
 from sqlalchemy import create_engine
 
 load_dotenv()
@@ -14,7 +14,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-def incremental_extract():
+def incremental_extract() -> None:
 
     try:
         logger.info(">>> Incremental extraction Started <<<")
@@ -112,7 +112,6 @@ def incremental_extract():
                 records.raise_for_status()
                 records_json = records.json()
 
-                reset = int(records.headers.get("x-ratelimit-reset"))
 
                 if 'results' in records_json and records_json['results'] != []:
 
@@ -163,6 +162,11 @@ def incremental_extract():
 
                 if records.status_code == 401:
                     break
+
+                if records.status_code == 429:
+                    logger.warning("Rate limit hit. Stopping extraction. Next run will resume.")
+                    break
+
             except Exception:
                 logger.exception("Unexpected error while processing sensor %s", sensor_id)
                 raise

@@ -187,6 +187,14 @@ For example:
 
 Log files are configured using Python's rotating file-handler functionality so that log history does not remain in a single indefinitely growing file.
 
+## Code Quality or Testing that mentions:
+
+pytest tests for extract_location and transform
+
+Type hints added to core functions
+
+How to run tests: pytest tests/
+
 ## Scheduling
 
 The incremental pipeline is designed to run automatically using **Windows Task Scheduler**.
