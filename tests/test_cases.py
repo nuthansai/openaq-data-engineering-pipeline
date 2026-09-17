@@ -1,9 +1,8 @@
+import pytest
 from src.initial.extract_locations import extract_location
 from src.initial.transform_measurements import transform
 
-
-def test_extract1():
-    data = [{
+data_1 = [{
       "id": 12, "name": "SPARTAN - IIT Kanpur", "locality": None,
       "timezone": "Asia/Kolkata",
       "country": {"id": 9, "code": "IN", "name": "India"},
@@ -205,19 +204,14 @@ def test_extract1():
     }
 ]
 
-    result = extract_location(data)
-
-    assert result == [{'location_id': 5408,
+expected_1 = [{'location_id': 5408,
                        'location_name': "Secretariat, Amaravati - APPCB",
                        'datetimeFirst': {"utc": "2025-02-18T20:15:00Z", "local": "2025-02-19T01:45:00+05:30"},
                        "datetimeLast": {"utc": "2026-06-15T06:00:00Z", "local": "2026-06-15T11:30:00+05:30"},
                        'sensor_id':[12234943, 12234944, 12234945, 14340731, 12234946, 12234947, 12234948, 12234949, 12234950, 12234951, 14340732, 14340733]
                     }]
 
-
-
-def test_extract2():
-    data = [
+data_2 = [
         {
             "id": 12, "name": "SPARTAN - IIT Kanpur", "locality": None,
             "timezone": "Asia/Kolkata",
@@ -239,12 +233,10 @@ def test_extract2():
             "datetimeLast": None
         }
     ]
-    result = extract_location(data)
 
-    assert result == []
+expected_2 = []
 
-def test_extract3():
-    data = [
+data_3 = [
         {
             "id": 13, "name": "Delhi Technological University, Delhi - CPCB", "locality": None,
             "timezone": "Asia/Kolkata",
@@ -293,9 +285,7 @@ def test_extract3():
         }
     ]
 
-    result = extract_location(data)
-
-    assert result == []
+expected_3 = []
 
 def test_transform():
     test_data = [
@@ -341,3 +331,13 @@ def test_transform():
     }
 
     assert actual == expected
+
+
+@pytest.mark.parametrize("input_value, expected_value",[
+    pytest.param(data_1, expected_1, id="extract_location_skips_entries_without_sensor_activity"),
+    pytest.param(data_2, expected_2, id="extract_location_returns_empty_for_location_without_datetime"),
+    pytest.param(data_3, expected_3, id="extract_location_returns_empty_for_location_with_old_record")
+])
+def test_extract_location_filters_by_activity_criteria(input_value, expected_value):
+    result = extract_location(input_value)
+    assert expected_value == result
