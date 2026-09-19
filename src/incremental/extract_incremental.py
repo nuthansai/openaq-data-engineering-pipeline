@@ -63,28 +63,30 @@ def incremental_extract() -> None:
 
 
 
-    files = DATA_DIR.glob("measurements_*.csv")
+    files = list(DATA_DIR.glob("measurements_*.csv"))
 
-    latest_file = max(
-        files,
-        key=lambda file: int(file.stem.split("_")[-1])
-    )
+    if files:
+        latest_file = max(
+            files,
+            key=lambda file: int(file.stem.split("_")[-1])
+        )
 
-    try:
-        df1 = pd.read_csv(latest_file)
-        is_empty = df1.empty
-    except pd.errors.EmptyDataError:
-        is_empty = True
+        try:
+            df1 = pd.read_csv(latest_file)
+            is_empty = df1.empty
+        except pd.errors.EmptyDataError:
+            is_empty = True
 
+        if is_empty:
+            file_index = int(latest_file.stem.split("_")[-1])
+            logger.debug("Reusing the latest empty file again")
+        else:
+            file_index = int(latest_file.stem.split("_")[-1]) + 1
 
+        file_name = DATA_DIR / f"measurements_{file_index}.csv"
 
-    if is_empty:
-        file_index = int(latest_file.stem.split("_")[-1])
-        logger.debug("Reusing the latest empty file again")
     else:
-        file_index = int(latest_file.stem.split("_")[-1]) + 1
-
-    file_name = DATA_DIR / f"measurements_{file_index}.csv"
+        file_name = DATA_DIR / "measurements_1.csv"
 
 
     fieldnames = ['location_id', 'location_name', 'sensor_id', 'value', 'parameter_id', 'parameter_name', 'parameter_unit', 'datetime']
@@ -161,9 +163,12 @@ def incremental_extract() -> None:
                 logger.error("HTTP error for sensor %s: %s", sensor_id, e)
 
                 if records.status_code == 401:
+                    logger.warning("failed due to unauthorized api key")
                     break
-
-                if records.status_code == 429:
+                elif records.status_code == 403:
+                    logger.warning("Access forbidden")
+                    break
+                elif records.status_code == 429:
                     logger.warning("Rate limit hit. Stopping extraction. Next run will resume.")
                     break
 

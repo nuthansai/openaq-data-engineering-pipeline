@@ -51,7 +51,7 @@ for result in results:
             print(f"Network failed for sensor {sensor_id}: {e}")
             continue
 
-        except requests.HTTPError as e:
+        except requests.exceptions.HTTPError as e:
             print(f"HTTP error for sensor {sensor_id}: {e}")
 
             if r_measurements.status_code == 401:

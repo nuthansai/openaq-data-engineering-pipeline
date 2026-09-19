@@ -1,5 +1,5 @@
 import json
-from typing import List, Sequence, Iterable
+from typing import List
 
 import requests
 
@@ -7,12 +7,26 @@ from src.config import HEADER_JSON, BASE_URL,DATA_DIR
 
 try:
     r_country = requests.get(f"{BASE_URL}/locations?countries_id=9",headers=HEADER_JSON)
-
+    r_country.raise_for_status()
     with open(DATA_DIR / "India_locations.json",
               mode="w", encoding="utf-8") as f:
         json.dump(r_country.json(), f)
+except requests.Timeout as e:
+    print(f"Timed out: {e}")
+    raise
 except requests.ConnectionError as e:
     print(f"Network failed :{e}")
+    raise
+except requests.exceptions.HTTPError as e:
+    if r_country.status_code == 401:
+        print("failed due to unauthorized api key")
+        raise
+    elif r_country.status_code == 403:
+        print("Access forbidden. Stopping extraction.")
+        raise
+    elif r_country.status_code == 429:
+        print("rate limit reached")
+        raise
 except Exception as e:
     print(e)
 

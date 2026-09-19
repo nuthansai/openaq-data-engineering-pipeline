@@ -1,6 +1,11 @@
 import pytest
+import unittest
+from unittest.mock import patch
+from requests.exceptions import Timeout,ConnectionError, HTTPError
 from src.initial.extract_locations import extract_location
 from src.initial.transform_measurements import transform
+from src.incremental.extract_incremental import incremental_extract
+
 
 data_1 = [{
       "id": 12, "name": "SPARTAN - IIT Kanpur", "locality": None,
