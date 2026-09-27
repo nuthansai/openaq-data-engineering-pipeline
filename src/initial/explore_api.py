@@ -29,7 +29,7 @@ from src.config import HEADER_JSON, BASE_URL,DATA_DIR
 # print(r_country.url)
 # print(r_country.json())
 try:
-    r_measurements = requests.get(f"{BASE_URL}/sensors/1/days?limit=2", headers=HEADER_JSON)
+    r_measurements = requests.get(f"{BASE_URL}/sensors/12235882/days?limit=2", headers=HEADER_JSON)
 
 
     print(r_measurements.json())

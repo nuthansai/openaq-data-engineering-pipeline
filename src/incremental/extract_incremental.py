@@ -50,14 +50,14 @@ def incremental_extract() -> None:
 
         logger.info("Dataframe is created and DB connection is closed")
 
-    except ArgumentError:
-        logger.exception("Error: ")
+    except ArgumentError as e:
+        logger.exception(f"Error: {e}")
         raise
-    except SQLAlchemyError:
-        logger.exception("Database connection failed: ")
+    except SQLAlchemyError as e:
+        logger.exception(f"Database connection failed: {e}")
         raise
     except Exception as e:
-        logger.exception("Unexpected error (e.g., missing driver): ")
+        logger.exception(f"Unexpected error (e.g., missing driver): {e}")
         raise
 
 
@@ -153,8 +153,8 @@ def incremental_extract() -> None:
                 # Wait 2 seconds between requests to avoid rapid request bursts and 429 errors
                 time.sleep(2)
 
-            except requests.Timeout:
-                logger.warning("Sensor %s timed out", sensor_id)
+            except requests.Timeout as e:
+                logger.warning("Sensor %s timed out: %s", sensor_id, e)
                 continue
             except requests.ConnectionError as e:
                 logger.warning("Network connection failed for sensor %s: %s", sensor_id, e)

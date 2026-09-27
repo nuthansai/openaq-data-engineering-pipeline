@@ -1,10 +1,11 @@
 import pytest
-import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock, Mock
 from requests.exceptions import Timeout,ConnectionError, HTTPError
-from src.initial.extract_locations import extract_location
+
+
+from src.initial.extract_locations import initial_extraction, extract_location
 from src.initial.transform_measurements import transform
-from src.incremental.extract_incremental import incremental_extract
+from src.initial.get_measurements import get_measurements
 
 
 data_1 = [{
@@ -346,3 +347,41 @@ def test_transform():
 def test_extract_location_filters_by_activity_criteria(input_value, expected_value):
     result = extract_location(input_value)
     assert expected_value == result
+
+
+class TestOpenAQ_initial():
+
+        # test cases for API calls for extract_locations.py
+
+    @pytest.mark.parametrize('exception, expected_exc, expected_msg', [
+        (Timeout("API call timed out"), Timeout, "Timed out: API call timed out"),
+        (ConnectionError("no connection"), ConnectionError, "Network failed :no connection")
+    ])
+    def test_initial_api_Timeout_ConnectionError(self, exception, expected_exc, expected_msg):
+        with patch('src.initial.extract_locations.requests.get') as mock:
+            with patch('builtins.print') as mock_print:
+                mock.side_effect = exception
+                with pytest.raises(expected_exc):
+                    initial_extraction()
+                mock_print.assert_called_once_with(expected_msg)
+
+    @pytest.mark.parametrize('status_code, exception, expected_exception, expected', [
+        (401, HTTPError, HTTPError(), "failed due to unauthorized api key"),
+        (403, HTTPError, HTTPError(), "Access forbidden. Stopping extraction."),
+        (429, HTTPError, HTTPError(), "API rate limit reached")
+    ])
+
+    def test_initial_api_HTTP(self, status_code, exception, expected_exception, expected):
+        with patch('src.initial.extract_locations.requests.get') as mock_req:
+            with patch('builtins.print') as mock_print:
+                mock_response = Mock()
+                mock_response.status_code = status_code
+                mock_response.raise_for_status.side_effect = expected_exception
+                mock_req.return_value = mock_response
+                with pytest.raises(exception):
+                    initial_extraction()
+
+                mock_print.assert_called_once_with(expected)
+
+
+    # test cases for API calls for get_measurements.py
