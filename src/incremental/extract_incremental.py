@@ -6,6 +6,8 @@ import pandas as pd
 import os
 from dotenv import load_dotenv
 from sqlalchemy.exc import SQLAlchemyError, ArgumentError
+from typing_extensions import Any
+
 from src.config import BASE_URL, HEADER_JSON, DATA_DIR
 from sqlalchemy import create_engine
 
@@ -13,17 +15,12 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+def extract_sql():
+    """Queries PostgreSQL for max_date for active sensors and their latest ingested timestamps."""
 
-def incremental_extract() -> None:
+    engine = create_engine(f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}")
 
-    try:
-        logger.info(">>> Incremental extraction Started <<<")
-
-        engine = create_engine(f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}")
-
-        with engine.connect() as conn:
-            pass
-
+    with engine.begin() as conn:
         logger.info(">>> Connection established to PostgreSQL <<<")
 
         query = '''
@@ -42,27 +39,17 @@ def incremental_extract() -> None:
                 ORDER BY location_id;
             '''
 
-        df_sql = pd.read_sql(query, engine)
-
-        if df_sql.empty:
-            logger.info("No measurements found in database. Incremental extraction cannot start.")
-            return
+        df_sql = pd.read_sql(query, conn)
 
         logger.info("Dataframe is created and DB connection is closed")
 
-    except ArgumentError as e:
-        logger.exception(f"Error: {e}")
-        raise
-    except SQLAlchemyError as e:
-        logger.exception(f"Database connection failed: {e}")
-        raise
-    except Exception as e:
-        logger.exception(f"Unexpected error (e.g., missing driver): {e}")
-        raise
+        if df_sql.empty:
+            logger.info("No measurements found in database. Incremental extraction cannot start.")
+            return None
+    return df_sql
 
-
-
-
+def select_csv_file():
+    """Finds the next available CSV path in DATA_DIR ( reuses empty latest file or increments index )."""
     files = list(DATA_DIR.glob("measurements_*.csv"))
 
     if files:
@@ -77,28 +64,77 @@ def incremental_extract() -> None:
         except pd.errors.EmptyDataError:
             is_empty = True
 
+        file_stem = latest_file.stem.split("_")[-1]
         if is_empty:
-            file_index = int(latest_file.stem.split("_")[-1])
+            file_index = int(file_stem)
             logger.debug("Reusing the latest empty file again")
         else:
-            file_index = int(latest_file.stem.split("_")[-1]) + 1
+            file_index = int(file_stem) + 1
 
         file_name = DATA_DIR / f"measurements_{file_index}.csv"
 
     else:
         file_name = DATA_DIR / "measurements_1.csv"
 
+    return file_name
 
-    fieldnames = ['location_id', 'location_name', 'sensor_id', 'value', 'parameter_id', 'parameter_name', 'parameter_unit', 'datetime']
+def download_sensor(sensor_id: int, new_date: pd.Timestamp) -> dict[str, Any]:
+
+    records = requests.get(f"{BASE_URL}/sensors/{sensor_id}/days?date_from={new_date}&limit=1000",
+                           headers=HEADER_JSON, timeout=20)
+    records.raise_for_status()
+    records_json = records.json()
+
+    # Wait 2 seconds between requests to avoid rapid request bursts and 429 errors
+    time.sleep(2)
+
+    return records_json
 
 
+def sensor_transformation(records_json: dict[str, Any], sensor_id: int, location_id: int, location_name: str) -> list[dict]:
+    measurement_list = []
+
+    if 'results' in records_json and records_json['results'] != []:
+
+        logger.debug("Received measurements for sensor %s", sensor_id)
+
+        results = records_json['results']
+
+        for record in results:
+            if record['period']['datetimeFrom']['local'] is None:
+                continue
+            measurement_dict = {
+                'location_id': location_id,
+                'location_name': location_name,
+                'sensor_id': sensor_id,
+                'value': record['value'],
+                'parameter_id': record['parameter']['id'],
+                'parameter_name': record['parameter']['name'],
+                'parameter_unit': record['parameter']['units'],
+                'datetime': record['period']['datetimeFrom']['local']
+            }
+            measurement_list.append(measurement_dict)
+
+    else:
+        logger.debug("Ignoring empty sensors: %s from API", sensor_id)
+
+    return measurement_list
+
+
+def write_to_csv(input_df, file_name):
+    """Orchestrates DB metadata lookup, API data fetching, transformation, and CSV export."""
+    logger.info(">>> Incremental extraction Started <<<")
+
+    fieldnames = ['location_id', 'location_name', 'sensor_id', 'value', 'parameter_id', 'parameter_name',
+                  'parameter_unit', 'datetime']
 
     with open(file_name, mode='w', encoding='utf-8', newline='') as cf:
         logger.info("New file created - %s", file_name.name)
         writer = csv.DictWriter(cf, fieldnames=fieldnames)
         writer.writeheader()
 
-        for i, row in enumerate(df_sql.itertuples(index=False),start=1):
+        for row in input_df.itertuples(index=False):
+
             sensor_id = row.sensor_id
             date = row.max_date
             location_id = row.location_id
@@ -109,71 +145,62 @@ def incremental_extract() -> None:
                 "Processing sensor %s | date=%s | location_id=%s | location=%s | new_date=%s",
                 sensor_id, date, location_id, location_name, new_date
             )
+
             try:
-                records = requests.get(f"{BASE_URL}/sensors/{sensor_id}/days?date_from={new_date}&limit=1000",headers=HEADER_JSON, timeout=20)
-                records.raise_for_status()
-                records_json = records.json()
-
-
-                if 'results' in records_json and records_json['results'] != []:
-
-                    logger.debug("Received measurements for sensor %s", sensor_id)
-
-                    results = records_json['results']
-                    measurement_list = []
-                    for record in results:
-                        if record['period']['datetimeFrom']['local'] is None:
-                            continue
-                        measurement_dict = {
-                            'location_id'     : location_id,
-                            'location_name'   : location_name,
-                            'sensor_id'       : sensor_id,
-                            'value'           : record['value'],
-                            'parameter_id'    : record['parameter']['id'],
-                            'parameter_name'  : record['parameter']['name'],
-                            'parameter_unit'  : record['parameter']['units'],
-                            'datetime'        : record['period']['datetimeFrom']['local']
-                        }
-                        measurement_list.append(measurement_dict)
-
-                    # row_count += len(measurement_list)
-
-                    writer.writerows(measurement_list)
-
-                    logger.debug("Writing sensor: %s measurements to the csv file", sensor_id)
-
-                    # if row_count >= chunk_size:
-                    #     file_index += 1
-
-
-                else:
-                    logger.debug("Ignoring empty sensors: %s from API", sensor_id)
-                    continue
-
-                # Wait 2 seconds between requests to avoid rapid request bursts and 429 errors
-                time.sleep(2)
-
+                records_json = download_sensor(sensor_id, new_date)
             except requests.Timeout as e:
-                logger.warning("Sensor %s timed out: %s", sensor_id, e)
+                logger.exception("Sensor %s timed out: %s", sensor_id, e)
                 continue
             except requests.ConnectionError as e:
-                logger.warning("Network connection failed for sensor %s: %s", sensor_id, e)
+                logger.exception("Network connection failed for sensor %s: %s", sensor_id, e)
                 continue
             except requests.exceptions.HTTPError as e:
                 logger.error("HTTP error for sensor %s: %s", sensor_id, e)
 
-                if records.status_code == 401:
-                    logger.warning("failed due to unauthorized api key")
+                if e.response.status_code == 401:
+                    logger.exception("Extraction failed due to unauthorized api key")
                     break
-                elif records.status_code == 403:
-                    logger.warning("Access forbidden")
+                elif e.response.status_code == 403:
+                    logger.exception("Access forbidden")
                     break
-                elif records.status_code == 429:
-                    logger.warning("Rate limit hit. Stopping extraction. Next run will resume.")
+                elif e.response.status_code == 429:
+                    logger.exception("Rate limit hit. Stopping extraction. Next run will resume.")
                     break
+                else:
+                    logger.exception("Unhandled HTTP status %s for sensor %s, skipping", e.response.status_code,
+                                   sensor_id)
+                    continue
 
-            except Exception:
-                logger.exception("Unexpected error while processing sensor %s", sensor_id)
-                raise
+            except Exception as e:
+                logger.exception("Unexpected error while processing sensor %s: %s", sensor_id, e)
+                continue
 
-    logger.info("Incremental extraction completed")
+            measurement_list = sensor_transformation(records_json, sensor_id, location_id, location_name)
+
+            writer.writerows(measurement_list)
+
+            logger.debug("Writing sensor: %s measurements to the csv file", sensor_id)
+
+
+        logger.info("Incremental extraction completed")
+
+
+def run_incremental_extract():
+    try:
+        df = extract_sql()
+    except ArgumentError as e:
+        logger.exception(f"Error: {e}")
+        raise
+    except SQLAlchemyError as e:
+        logger.exception(f"Database connection failed: {e}")
+        raise
+    except Exception as e:
+        logger.exception(f"Unexpected error (e.g., missing driver): {e}")
+        raise
+
+    if df is None or df.empty:
+        return None
+
+    file_name = select_csv_file()
+
+    return write_to_csv(df, file_name)

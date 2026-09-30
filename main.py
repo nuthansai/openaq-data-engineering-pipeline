@@ -1,8 +1,8 @@
 from src.load import load_postgres
-from src.incremental.extract_incremental import incremental_extract
+from src.incremental.extract_incremental import run_incremental_extract
 import src.logging_config
 def  main():
-    incremental_extract()
+    run_incremental_extract()
     load_postgres()
 
 if __name__ == '__main__':
