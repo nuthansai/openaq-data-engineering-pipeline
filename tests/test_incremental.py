@@ -1,5 +1,5 @@
 import csv
-from unittest.mock import patch, Mock, MagicMock
+from unittest.mock import patch, Mock
 
 import pandas as pd
 import pytest
@@ -8,7 +8,7 @@ from src.incremental.extract_incremental import run_incremental_extract, extract
 from sqlalchemy.exc import ArgumentError, SQLAlchemyError
 
 
-class TestOpenAQ_incremental():
+class TestOpenAQIncremental:
     @pytest.mark.parametrize('exception, expected_exception',[
             (ArgumentError("bad argument at construction time"), ArgumentError),
             (SQLAlchemyError("Connection Failed"), SQLAlchemyError)
@@ -88,7 +88,6 @@ class TestOpenAQ_incremental():
             with file_name.open('r', encoding='utf-8') as f:
                 reader = list(csv.DictReader(f))
 
-                print(type(reader))
                 assert reader[0] == {'location_id': '101', 'location_name': 'LocA', 'sensor_id': '87356',
                                      'value': '10', 'parameter_id': '201', 'parameter_name': 'pm25',
                                      'parameter_unit': 'µg/m³', 'datetime': '2024-01-01T00:00:00'}
@@ -98,3 +97,49 @@ class TestOpenAQ_incremental():
                                      'parameter_unit': 'ppb', 'datetime': '2024-01-02T00:00:00'}
 
             assert expected_logs in caplog.text
+
+
+    @pytest.mark.parametrize('raised_exception, expected_logs, status_code', [
+        (HTTPError, "Extraction failed due to unauthorized api key", 401),
+        (HTTPError, "Access forbidden", 403),
+        (HTTPError, "Rate limit hit. Stopping extraction. Next run will resume.", 429)
+    ])
+    def test_download_sensor_raises_HTTP_in_run_incremental_extract(self, caplog, tmp_path, raised_exception, expected_logs, status_code):
+        caplog.set_level('ERROR')
+
+        df = pd.DataFrame({
+            'sensor_id': [87356, 87357, 87358],
+            'max_date': [pd.Timestamp('2024-01-01')] * 3,
+            'location_id': [101, 102, 103],
+            'location_name': ['LocA', 'LocB', 'LocC'],
+            'parameter_id': [201, 202, 203],
+            'parameter_name': ['pm25', 'no2', 'no']
+        })
+
+        file_name = tmp_path / "output.csv"
+
+        with patch('src.incremental.extract_incremental.download_sensor') as mock_download:
+            mock_response = Mock(status_code=status_code)  # fake object, has .status_code
+            http_error = raised_exception(response=mock_response)  # real exception, .response = our fake object
+            mock_download.side_effect = [
+                {"results": [{"value": 10, "parameter": {"id": 201, "name": "pm25", "units": "µg/m³"},
+                              "period": {"datetimeFrom": {"local": "2024-01-01T00:00:00"}}}]},
+                http_error,
+                {"results": [{"value": 30, "parameter": {"id": 203, "name": "no", "units": "ppb"},
+                              "period": {"datetimeFrom": {"local": "2024-01-02T00:00:00"}}}]}
+            ]
+
+            # with pytest.raises(expected_exception):
+            write_to_csv(df,file_name)
+
+            assert file_name.exists()
+
+            with file_name.open('r', encoding='utf-8') as f:
+                reader = list(csv.DictReader(f))
+
+                assert reader[0] == {'location_id': '101', 'location_name': 'LocA', 'sensor_id': '87356',
+                                     'value': '10', 'parameter_id': '201', 'parameter_name': 'pm25',
+                                     'parameter_unit': 'µg/m³', 'datetime': '2024-01-01T00:00:00'}
+
+            assert mock_download.call_count == 2
+            assert expected_logs in caplog.text  # when download_sensor() is CALLED, raise this

@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock, Mock
+from unittest.mock import patch, Mock
 from requests.exceptions import Timeout,ConnectionError, HTTPError
 
 
@@ -349,7 +349,7 @@ def test_extract_location_filters_by_activity_criteria(input_value, expected_val
     assert expected_value == result
 
 
-class TestOpenAQ_initial():
+class TestOpenAQInitial():
 
         # test cases for API calls for extract_locations.py
 
@@ -374,8 +374,7 @@ class TestOpenAQ_initial():
     def test_initial_api_HTTP(self, status_code, exception, expected_exception, expected):
         with patch('src.initial.extract_locations.requests.get') as mock_req:
             with patch('builtins.print') as mock_print:
-                mock_response = Mock()
-                mock_response.status_code = status_code
+                mock_response = Mock(status_code = status_code)
                 mock_response.raise_for_status.side_effect = expected_exception
                 mock_req.return_value = mock_response
                 with pytest.raises(exception):

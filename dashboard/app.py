@@ -8,10 +8,6 @@ load_dotenv()
 
 engine = create_engine(f"postgresql://{os.getenv("DB_USER")}:{os.getenv("DB_PASSWORD")}@{os.getenv("DB_HOST")}/{os.getenv("DB_NAME")}")
 
-import streamlit as st
-import pandas as pd
-from sqlalchemy import text
-
 
 # --------------------------------------------------
 # Page configuration
