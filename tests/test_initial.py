@@ -1,12 +1,11 @@
+import json
+
 import pytest
 from unittest.mock import patch, Mock
 from requests.exceptions import Timeout,ConnectionError, HTTPError
-
-
 from src.initial.extract_locations import initial_extraction, extract_location
 from src.initial.transform_measurements import transform
-from src.initial.get_measurements import get_measurements
-
+from src.initial.get_measurements import get_measurements, get_measurements_download_sensor, write_to_json
 
 data_1 = [{
       "id": 12, "name": "SPARTAN - IIT Kanpur", "locality": None,
@@ -384,3 +383,65 @@ class TestOpenAQInitial():
 
 
     # test cases for API calls for get_measurements.py
+
+TARGET = "src.initial.get_measurements.get_measurements_download_sensor"
+
+
+def api_payload(value):
+    return {"results": [{"value": value}]}
+
+
+class TestGetMeasurements:
+
+    @pytest.mark.parametrize("exception", [
+        Timeout("slow"),
+        ConnectionError("down"),
+    ])
+    def test_request_errors_propagate(self, exception):
+        with patch("src.initial.get_measurements.requests.get") as mock_get:
+            mock_get.side_effect = exception
+            with pytest.raises(type(exception)):
+                get_measurements_download_sensor(1)
+
+    def test_http_error_propagates(self):
+        with patch("src.initial.get_measurements.requests.get") as mock_get:
+            mock_response = Mock()
+            mock_response.raise_for_status.side_effect = HTTPError()
+            mock_get.return_value = mock_response
+            with pytest.raises(HTTPError):
+                get_measurements_download_sensor(1)
+
+    @pytest.mark.parametrize("exception, expected_msg", [
+        (Timeout("slow"), "Request timed out for sensor 2: slow"),
+        (ConnectionError("down"), "Network connection failed for sensor 2: down"),
+    ])
+    def test_timeout_and_connection_error_skip_sensor(self, exception, expected_msg):
+        locations = [{"location_id": 1, "location_name": "A", "sensor_id": [1, 2, 3]}]
+
+        with patch(TARGET) as mock_download, patch("builtins.print") as mock_print:
+            mock_download.side_effect = [api_payload(10), exception, api_payload(30)]
+            result = get_measurements(locations)
+
+        assert mock_download.call_count == 3
+        assert [s["sensor_id"] for s in result[0]["sensor"]] == [1, 3]
+        mock_print.assert_called_once_with(expected_msg)
+
+    @pytest.mark.parametrize("status_code, expected_msg", [
+        (401, "Invalid credentials. Stopping extraction. this file stopped early"),
+        (403, "Access forbidden. Stopping extraction. this file stopped early"),
+        (429, "Rate limit exceeded. Stopping extraction. this file stopped early"),
+    ])
+    def test_fatal_http_status_stops_extraction(self, status_code, expected_msg):
+        locations = [
+            {"location_id": 1, "location_name": "A", "sensor_id": [1]},
+            {"location_id": 2, "location_name": "B", "sensor_id": [2, 3]},
+        ]
+        error = HTTPError(response=Mock(status_code=status_code))
+
+        with patch(TARGET) as mock_download, patch("builtins.print") as mock_print:
+            mock_download.side_effect = [api_payload(10), error]
+            result = get_measurements(locations)
+
+        assert mock_download.call_count == 2
+        assert [loc["location_id"] for loc in result] == [1]
+        assert mock_print.call_args_list[-1].args == (expected_msg,)

@@ -2,6 +2,16 @@ import requests
 import json
 from src.config import HEADER_JSON, BASE_URL, DATA_DIR
 
+def get_measurements_download_sensor(sensor_id):
+    r_measurements = requests.get(
+        f"{BASE_URL}/sensors/{sensor_id}/days?limit=375",
+        headers=HEADER_JSON,
+        timeout=5
+    )
+
+    r_measurements.raise_for_status()
+
+    return r_measurements.json()
 
 def get_measurements(input_results):
     measurements_data_list = []
@@ -20,14 +30,7 @@ def get_measurements(input_results):
         for sensor_id in sensor_ids:
 
             try:
-                r_measurements = requests.get(
-                    f"{BASE_URL}/sensors/{sensor_id}/days?limit=375",
-                    headers=HEADER_JSON,
-                    timeout=5
-                )
-
-                r_measurements.raise_for_status()
-                response_json = r_measurements.json()
+                response_json = get_measurements_download_sensor(sensor_id)
 
                 if 'results' in response_json and response_json['results'] != []:
 
@@ -47,21 +50,21 @@ def get_measurements(input_results):
                 continue
 
             except requests.ConnectionError as e:
-                print(f"Network failed for sensor {sensor_id}: {e}")
+                print(f"Network connection failed for sensor {sensor_id}: {e}")
                 continue
 
             except requests.exceptions.HTTPError as e:
                 print(f"HTTP error for sensor {sensor_id}: {e}")
 
-                if r_measurements.status_code == 401:
+                if e.response.status_code == 401:
                     print("Invalid credentials. Stopping extraction. this file stopped early")
                     return measurements_data_list
 
-                if r_measurements.status_code == 403:
+                if e.response.status_code == 403:
                     print("Access forbidden. Stopping extraction. this file stopped early")
                     return measurements_data_list
 
-                if r_measurements.status_code == 429:
+                if e.response.status_code == 429:
                     print("Rate limit exceeded. Stopping extraction. this file stopped early")
                     return measurements_data_list
 
@@ -76,7 +79,8 @@ def get_measurements(input_results):
 
     return measurements_data_list
 
-if __name__ == "__main__":
+
+def write_to_json():
     with open(DATA_DIR / 'selected_locations.json', mode='r', encoding='utf-8') as f:
         results = json.load(f)
 
@@ -88,3 +92,8 @@ if __name__ == "__main__":
         encoding='utf-8'
     ) as f:
         json.dump(final_measurements_list, f)
+
+
+
+if __name__ == "__main__":
+    write_to_json()

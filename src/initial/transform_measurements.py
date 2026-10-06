@@ -25,7 +25,7 @@ def transform(input_data: Iterable[dict]) -> Generator[dict[str, Any], Any, None
 
 
 with open(DATA_DIR / 'measurements_data.json', mode='rb') as f, \
-        open(DATA_DIR / 'measurements5.csv', 'w', newline='', encoding='utf-8') as cf:
+        open(DATA_DIR / 'measurements.csv', 'w', newline='', encoding='utf-8') as cf:
     data = ijson.items(f, 'item')
     result = transform(data)
     writer = None
