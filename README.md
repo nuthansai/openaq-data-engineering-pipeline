@@ -1,356 +1,303 @@
 # OpenAQ Data Engineering Pipeline
 
-A Python-based data engineering pipeline that extracts air-quality measurements from the OpenAQ API, transforms the data, stages it as CSV files, and loads it into PostgreSQL.
+A Python-based data engineering project for collecting, transforming, loading, and analyzing air-quality measurements from the OpenAQ API into PostgreSQL. The repository includes:
 
-The project supports both an **initial historical extraction** and **incremental extraction**. Incremental runs use PostgreSQL as the source of truth to determine the latest measurement available for each sensor and parameter.
+- an initial historical extraction workflow
+- an incremental extraction workflow based on the latest database state
+- CSV staging for intermediate data storage
+- PostgreSQL schema and data-quality views
+- a Streamlit dashboard for air-quality analysis
+
+## Overview
+
+This project ingests air-quality data from OpenAQ for monitoring stations across India. It stores the information in PostgreSQL and makes it available for downstream analysis, reporting, and dashboarding.
+
+The workflow follows a common data engineering pattern:
+
+1. Extract data from an external API
+2. Transform raw API responses into a consistent structure
+3. Write intermediate CSV files
+4. Load data into PostgreSQL
+5. Query the database for analysis and reporting
+6. Visualize trends via Streamlit
 
 ## Architecture
 
 ```text
-                         Initial Historical Load
-
 OpenAQ API
     │
     ▼
-Extract locations & sensor measurements
+Extract locations and measurement data
     │
     ▼
-Transform API responses
+Transform records into normalized data model
     │
     ▼
-CSV staging files
+Write CSV staging files
     │
     ▼
-PostgreSQL
-```
-
-For subsequent runs, the pipeline uses the database to determine where extraction should continue:
-
-```text
-PostgreSQL
+Load into PostgreSQL
     │
-    │ MAX(datetime) per sensor/parameter
-    ▼
-Determine next extraction date
+    ├── locations
+    ├── parameters
+    ├── sensors
+    └── measurements
     │
     ▼
-OpenAQ API
-    │
-    ▼
-Transform measurements
-    │
-    ▼
-CSV staging file
-    │
-    ▼
-PostgreSQL
+Run SQL analysis / dashboard queries
 ```
 
-## Key Design Decisions
+### Incremental extraction design
 
-### PostgreSQL is the source of truth
+The pipeline does not use the latest CSV as the source of truth for its next run. Instead, it queries PostgreSQL to find the latest timestamp per sensor and parameter combination, and then requests only new data after that point.
 
-The incremental pipeline does not use the latest CSV to determine which data should be extracted next.
+This approach allows the pipeline to resume safely after interruptions and avoids depending on temporary CSV state.
 
-For every sensor and parameter combination, the pipeline queries PostgreSQL for:
+## Key features
 
-```sql
-MAX(datetime)
-```
+- API extraction from OpenAQ using Python `requests`
+- Historical initial load and incremental refresh logic
+- PostgreSQL as the persistent source of truth
+- CSV-based staging before database inserts
+- Duplicate prevention using database conflict logic
+- Logging and exception handling for API and database failures
+- SQL analysis views for filtered pollutant and meteorological datasets
+- Streamlit dashboard for air-quality exploration
 
-The next extraction date is then calculated as:
+## Repository structure
 
 ```text
-MAX(datetime) + 1 day
-```
-
-This means the pipeline can recover from previous runs based on the data actually loaded into PostgreSQL.
-
-### CSV as an intermediate staging layer
-
-CSV files are used as an intermediate artifact between extraction/transformation and database loading.
-
-The CSV is not used to determine incremental state.
-
-This separation allows the extraction and loading stages to remain independent. If a database load fails, the generated CSV can still be inspected or reused without having to retrieve the data from the API again.
-
-## Pipeline Components
-
-### API Extraction
-
-The pipeline communicates directly with the OpenAQ API using Python's `requests` library.
-
-The initial extraction retrieves historical measurements, while the incremental extraction determines the required date range from PostgreSQL and requests only the subsequent data.
-
-API requests use an explicit timeout to prevent a slow request from blocking the pipeline indefinitely.
-
-Requests are also deliberately spaced using a two-second delay to avoid rapid request bursts and reduce the likelihood of API rate-limit errors.
-
-### Transformation
-
-OpenAQ API responses are transformed into a consistent measurement structure containing fields such as:
-
-* `location_id`
-* `location_name`
-* `sensor_id`
-* `value`
-* `parameter_id`
-* `parameter_name`
-* `parameter_unit`
-* `datetime`
-
-The transformed records are written to CSV files.
-
-### CSV File Management
-
-Incremental measurement files follow the naming convention:
-
-```text
-measurements_1.csv
-measurements_2.csv
-measurements_3.csv
-...
-```
-
-The pipeline identifies the latest numbered file using `pathlib`.
-
-If the latest CSV is empty, its file number can be reused. Otherwise, the next sequential file number is created.
-
-### PostgreSQL Loading
-
-The loader reads the latest measurement CSV and loads data into four PostgreSQL tables:
-
-```text
-locations
-parameters
-sensors
-measurements
-```
-
-SQLAlchemy is used for database interaction.
-
-The database inserts use PostgreSQL's `ON CONFLICT DO NOTHING` behavior to prevent duplicate records.
-
-For measurements, the conflict key is:
-
-```text
-sensor_id + parameter_id + datetime
-```
-
-This provides protection against duplicate measurements both within repeated pipeline runs and when previously loaded data appears again in an incoming CSV.
-
-Database operations are performed inside a transaction using SQLAlchemy's:
-
-```python
-with engine.begin() as conn:
-```
-
-If the transaction succeeds, the changes are committed. If an error occurs, the transaction is rolled back.
-
-## Error Handling
-
-The project distinguishes between expected/recoverable failures and unexpected failures.
-
-Examples include:
-
-* API timeout → logged and the sensor is skipped
-* Network connection failure → logged and processing continues
-* HTTP authentication failure → extraction is stopped
-* Database/SQLAlchemy errors → logged and re-raised
-* Unexpected exceptions → logged with traceback and re-raised
-
-Python's built-in `logging` module is used throughout the project.
-
-Each module creates its own logger using:
-
-```python
-logger = logging.getLogger(__name__)
-```
-
-Logging configuration is centralized so that extraction and loading modules use the same logging setup.
-
-## Logging
-
-Logs are written using Python's logging framework.
-
-The log format contains:
-
-```text
-timestamp - module - level - message
-```
-
-For example:
-
-```text
-2026-08-24 14:30 - src.incremental.extract_incremental - INFO - Incremental extraction Started
-```
-
-Log files are configured using Python's rotating file-handler functionality so that log history does not remain in a single indefinitely growing file.
-
-## Code Quality or Testing that mentions:
-
-pytest tests for extract_location and transform
-
-Type hints added to core functions
-
-How to run tests: pytest tests/
-
-## Scheduling
-
-The incremental pipeline is designed to run automatically using **Windows Task Scheduler**.
-
-The scheduled process runs the pipeline entry point, which performs:
-
-```text
-Incremental extraction
-        ↓
-CSV creation
-        ↓
-PostgreSQL loading
-```
-
-The database determines the correct starting point for each incremental run, so the pipeline does not depend on manually specifying the next extraction date.
-
-## Project Structure
-
-A simplified structure is:
-
-```text
-project/
-│
-├── src/
-│   ├── config.py
-│   ├── logging_config.py
-│   ├── load.py
-│   ├── ...
-│   └── incremental/
-│       └── extract_incremental.py
-│
-├── main.py
-├── data/
-├── logs/
-├── .env
+openaq-data-engineering-pipeline/
 ├── .gitignore
-└── requirements.txt
+├── main.py
+├── README.md
+├── dashboard/
+│   └── app.py
+├── sql/
+│   ├── create_tables.sql
+│   └── sql_analysis.sql
+├── src/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── load.py
+│   ├── logging_config.py
+│   ├── sql_models.py
+│   ├── initial/
+│   │   ├── __init__.py
+│   │   ├── explore_api.py
+│   │   ├── extract_locations.py
+│   │   ├── get_measurements.py
+│   │   └── transform_measurements.py
+│   └── incremental/
+│       ├── __init__.py
+│       └── extract_incremental.py
+├── tests/
+│   ├── __init__.py
+│   ├── test_incremental.py
+│   └── test_initial.py
+├── Data/                 # generated at runtime
+├── log/                  # generated at runtime
+└── .env                  # local environment configuration
 ```
 
-The exact project structure may contain additional modules for the historical extraction and transformation stages.
+## Tech stack
 
-## Configuration
+- Python
+- `requests` for API calls
+- `pandas` for transformation and CSV handling
+- `SQLAlchemy` for DB interactions
+- PostgreSQL for storage and analysis
+- `python-dotenv` for environment variables
+- `Streamlit` for dashboarding
+- `pytest` for testing
 
-Sensitive configuration such as database credentials and API credentials is provided through environment variables rather than being hard-coded into the source code.
+## Prerequisites
 
-A `.env` file can be used locally.
+Before running the project, make sure you have:
 
-Example:
+- Python 3.10+
+- PostgreSQL installed and running
+- A valid OpenAQ API key
+- Access to a local or remote PostgreSQL database
 
-```text
-DB_USER=your_username
+## Environment configuration
+
+Create a `.env` file in the project root with the required variables:
+
+```env
+OPENAQ_API_KEY=your_openaq_api_key
+DB_HOST=localhost
+DB_USER=postgres
 DB_PASSWORD=your_password
-DB_HOST=your_host
 DB_NAME=your_database
 ```
 
-The `.env` file should **not** be committed to GitHub.
+The project reads these settings in `src/config.py` using `python-dotenv`.
+
+## Database setup
+
+The schema is defined in `sql/create_tables.sql`.
+
+Run the SQL file against your PostgreSQL database before the first load:
+
+```bash
+psql -U postgres -d your_database -f sql/create_tables.sql
+```
+
+The schema includes:
+
+- `locations`
+- `parameters`
+- `sensors`
+- `measurements`
 
 ## Installation
 
-Clone the repository and create a Python virtual environment:
+Clone the repository:
 
 ```bash
-git clone <your-repository-url>
-cd <your-repository>
+git clone https://github.com/nuthansai/openaq-data-engineering-pipeline.git
+cd openaq-data-engineering-pipeline
 ```
 
-Create and activate the virtual environment:
+Create and activate a virtual environment:
 
 ```bash
-python -m venv venv
+python -m venv .venv
 ```
 
 On Windows:
 
 ```bash
-venv\Scripts\activate
+.venv\Scripts\activate
 ```
 
-Install the required dependencies:
+On macOS/Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Configure the required environment variables in `.env`.
+If a `requirements.txt` file is not present in the repo, install the commonly required packages manually:
 
-Make sure PostgreSQL is available and the required database/tables have been created.
+```bash
+pip install requests pandas sqlalchemy python-dotenv streamlit pytest
+```
 
-## Running the Pipeline
+## Running the pipeline
 
-The pipeline entry point is:
+The main entry point is:
 
 ```bash
 python main.py
 ```
 
-The incremental pipeline then:
+`main.py` triggers the incremental extraction and then loads the generated CSV file into PostgreSQL:
 
-```text
-1. Connects to PostgreSQL
-2. Finds MAX(datetime) for each sensor/parameter
-3. Determines the next extraction date
-4. Requests new measurements from OpenAQ
-5. Transforms the API response
-6. Writes the measurements to CSV
-7. Loads the CSV into PostgreSQL
-8. Prevents duplicate database records
-9. Records execution details in the log
+```python
+from src.load import load_orchestrator
+from src.incremental.extract_incremental import run_incremental_extract
+import src.logging_config
+
+
+def main():
+    run_incremental_extract()
+    load_orchestrator()
 ```
 
-## Technologies Used
+This means the pipeline:
 
-* **Python**
-* **Requests** — OpenAQ API communication
-* **Pandas** — data processing and transformation
-* **PostgreSQL** — persistent data store
-* **SQLAlchemy** — database connectivity and inserts
-* **python-dotenv** — environment configuration
-* **Python logging** — application logging
-* **CSV** — intermediate staging format
-* **Windows Task Scheduler** — scheduled execution
+1. looks up the latest data in PostgreSQL
+2. determines the next extraction window
+3. fetches new measurements from OpenAQ
+4. writes results to a CSV file
+5. loads them into database tables
 
-## What This Project Demonstrates
+## Dashboard
 
-This project was built to practice the core concepts involved in developing a practical data pipeline:
+The project includes a Streamlit dashboard for exploring the loaded data:
 
-* REST API data extraction
-* Historical and incremental data ingestion
-* API rate-limit management
-* Data transformation
-* File-based staging
-* Relational database loading
-* PostgreSQL conflict handling
-* Transaction management
-* Exception handling
-* Structured application logging
-* Database-driven incremental processing
-* Automated scheduled execution
+```bash
+streamlit run dashboard/app.py
+```
 
-## Future Improvements
+This dashboard includes:
 
-Potential future improvements include:
+- dataset overview KPIs
+- monthly pollutant trend charts
+- top polluted locations
+- pollutant comparison views
+- seasonal pollution summaries
 
-* Load statistics such as attempted, inserted, and duplicate rows
-* More detailed monitoring of pipeline execution
-* Additional analytical SQL queries for newly accumulated data
-* Further improvements to retry and API failure handling
+## SQL analysis and data quality
 
-These are considered enhancements rather than prerequisites for the core pipeline.
+The SQL scripts under `sql/` contain analysis and cleaning logic, including:
 
-## Data Source
+- creating clean pollutant and meteorological views
+- identifying negative or abnormal values
+- exploring trends and location-level insights
+- comparing pollution by season, parameter, and geography
 
-This project uses data provided by the OpenAQ API.
+Examples include:
 
-OpenAQ documentation:
+- `clean_pollutants`
+- `clean_meteorological`
+- summary queries for PM2.5, NO2, humidity, wind, and temperature
 
-https://docs.openaq.org/
-git
+This is especially important because the dataset contains quality issues such as negative values, which are filtered for analysis.
+
+## Testing
+
+The repository contains unit tests for both initial and incremental workflows:
+
+```bash
+pytest tests/
+```
+
+These tests cover the main extraction and transformation logic and help validate the pipeline behavior.
+
+## Logging
+
+The project uses Python’s `logging` module to capture application events, API failures, and database errors. Logs are stored under the `log/` directory.
+
+## Notes
+
+- `.env` should not be committed to GitHub.
+- Generated runtime folders such as `Data/` and `log/` are ignored by Git.
+- The pipeline is designed to be schedulable for regular updates, such as via Windows Task Scheduler or cron.
+- The dashboard expects the PostgreSQL database to already contain cleaned and loaded analysis data.
+
+## What this project demonstrates
+
+This repository is a practical example of:
+
+- API-driven data ingestion
+- incremental ELT processing
+- PostgreSQL modeling and loading
+- data cleaning and validation
+- analytical SQL
+- dashboard-based business intelligence
+- end-to-end data engineering workflow design
+
+## Future improvements
+
+Potential next steps for the project include:
+
+- richer load metrics and row counts
+- retry policies for API rate limits
+- automated scheduling and orchestration
+- more robust validation and alerting
+- deployment packaging and environment automation
+
+## Data source
+
+This project uses OpenAQ API data.
+
+Documentation: https://docs.openaq.org/
+
