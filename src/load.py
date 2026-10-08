@@ -1,16 +1,13 @@
 import logging
-
 import pandas as pd
-import os
-from dotenv import load_dotenv
+from PIL.ImageChops import duplicate
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.engine.url import URL
 from sqlalchemy.exc import SQLAlchemyError, ArgumentError
-
-from src.config import DATA_DIR
-
+from src.config import DATA_DIR, DB_USER, DB_PASSWORD, DB_HOST, DB_NAME
 from src.sql_models import locations, parameters, sensors, measurements
-load_dotenv()
+
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +20,7 @@ def read_from_csv(file):
         logger.debug("dataframe created from %s", file.name)
 
     except pd.errors.EmptyDataError as e:
-        logger.error('Empty File: %s', e)
+        logger.error('Empty File %s: %s', file.name, e)
         raise
 
     return df
@@ -33,8 +30,15 @@ def load_postgres(location_record, parameter_record, sensor_record, measurement_
     try:
         logger.info(">>> Incremental loading Started <<<")
 
-        engine = create_engine(
-            f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}")
+        db_url = URL.create(
+            drivername="postgresql",
+            username=DB_USER,
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            database=DB_NAME
+        )
+
+        engine = create_engine(db_url)
 
         with engine.begin() as conn:
 
@@ -42,22 +46,63 @@ def load_postgres(location_record, parameter_record, sensor_record, measurement_
 
             insert_location = insert(locations).values(location_record)
             do_nothing_loc = insert_location.on_conflict_do_nothing(index_elements = ["location_id"])
-            conn.execute(do_nothing_loc)
+
+            result_loc = conn.execute(do_nothing_loc)
+            location_rows_affected = result_loc.rowcount
+            location_duplicate_count = len(location_record) - location_rows_affected
+
+            location_stats = {
+                'locations_attempted': len(location_record),
+                'locations_inserted': location_rows_affected,
+                'location_duplicates': location_duplicate_count
+            }
+            logger.info(f"Load summary: {location_stats}")
 
 
             insert_parameter = insert(parameters).values(parameter_record)
             do_nothing_par = insert_parameter.on_conflict_do_nothing(index_elements=["parameter_id"])
-            conn.execute(do_nothing_par)
+
+            result_par = conn.execute(do_nothing_par)
+            parameter_rows_affected = result_par.rowcount
+            parameter_duplicate_count = len(parameter_record) - parameter_rows_affected
+
+            parameter_stats = {
+                'locations_attempted': len(parameter_record),
+                'locations_inserted': parameter_rows_affected,
+                'parameter_duplicates': parameter_duplicate_count
+            }
+            logger.info(f"Load summary: {parameter_stats}")
 
 
             insert_sensor = insert(sensors).values(sensor_record)
             do_nothing_sensor = insert_sensor.on_conflict_do_nothing(index_elements = ["sensor_id"])
-            conn.execute(do_nothing_sensor)
+            result_sensor = conn.execute(do_nothing_sensor)
+
+            sensor_rows_affected = result_sensor.rowcount
+            sensor_duplicate_count = len(location_record) - sensor_rows_affected
+
+            sensor_stats = {
+                'locations_attempted': len(location_record),
+                'locations_inserted': sensor_rows_affected,
+                'measurements_duplicates': sensor_duplicate_count
+            }
+            logger.info(f"Load summary: {sensor_stats}")
 
 
             insert_measurement = insert(measurements).values(measurement_record)
             do_nothing_mes = insert_measurement.on_conflict_do_nothing(index_elements=['sensor_id', 'parameter_id', 'datetime'])
-            conn.execute(do_nothing_mes)
+
+
+            result_mes = conn.execute(do_nothing_mes)
+            mes_rows_affected = result_mes.rowcount
+            mes_duplicate_count = len(location_record) - mes_rows_affected
+
+            mes_stats = {
+                'locations_attempted': len(location_record),
+                'locations_inserted': mes_rows_affected,
+                'measurements_duplicates': mes_duplicate_count
+            }
+            logger.info(f"Load summary: {mes_stats}")
 
     except ArgumentError as e:
 
@@ -66,7 +111,7 @@ def load_postgres(location_record, parameter_record, sensor_record, measurement_
 
     except SQLAlchemyError as e:
 
-        logger.exception("Database connection failed: %s", e)
+        logger.exception("Database error during load: %s", e)
         raise
 
 
