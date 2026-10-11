@@ -23,7 +23,7 @@ def read_from_csv(file):
 
     return df
 
-def load_postgres(location_record, parameter_record, sensor_record, measurement_record):
+def load_postgres(location_record, parameter_record, sensor_record, measurement_record, engine=None):
 
     try:
         logger.info(">>> Incremental loading Started <<<")
@@ -36,7 +36,8 @@ def load_postgres(location_record, parameter_record, sensor_record, measurement_
             database=DB_NAME
         )
 
-        engine = create_engine(url)
+        if engine is None:
+            engine = create_engine(url)
 
         with engine.begin() as conn:
 
