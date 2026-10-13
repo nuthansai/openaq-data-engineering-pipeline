@@ -28,15 +28,15 @@ def load_postgres(location_record, parameter_record, sensor_record, measurement_
     try:
         logger.info(">>> Incremental loading Started <<<")
 
-        url = URL.create(
-            drivername="postgresql",
-            username=DB_USER,
-            password=DB_PASSWORD,
-            host=DB_HOST,
-            database=DB_NAME
-        )
-
         if engine is None:
+            url = URL.create(
+                drivername="postgresql",
+                username=DB_USER,
+                password=DB_PASSWORD,
+                host=DB_HOST,
+                database=DB_NAME
+            )
+
             engine = create_engine(url)
 
         with engine.begin() as conn:

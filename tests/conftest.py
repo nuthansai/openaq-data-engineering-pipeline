@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import URL, create_engine, text
 
 
-@pytest.fixture(scope='class')
+@pytest.fixture(scope='function')
 def connect_postgres():
     url = URL.create(
         drivername='postgresql',
