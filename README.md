@@ -160,35 +160,37 @@ git clone https://github.com/nuthansai/openaq-data-engineering-pipeline.git
 cd openaq-data-engineering-pipeline
 ```
 
-Create and activate a virtual environment:
+This project uses `uv` for dependency management and virtual environment setup.
+
+Install the project and its dependencies:
 
 ```bash
-python -m venv .venv
+uv sync --group dev
 ```
 
-On Windows:
+This creates a managed virtual environment and installs the dependencies from `pyproject.toml`.
 
-```bash
-.venv\Scripts\activate
-```
-
-On macOS/Linux:
+If you want to activate the environment manually:
 
 ```bash
 source .venv/bin/activate
 ```
 
-Install dependencies:
+On Windows PowerShell:
 
-```bash
-pip install -r requirements.txt
+```powershell
+.\.venv\Scripts\Activate.ps1
 ```
 
-If a `requirements.txt` file is not present in the repo, install the commonly required packages manually:
+To run commands inside the project environment without activating it manually, use:
 
 ```bash
-pip install requests pandas sqlalchemy python-dotenv streamlit pytest
+uv run python main.py
+uv run pytest tests/
+uv run streamlit run dashboard/app.py
 ```
+
+The project uses the environment variables defined in `.env`; create that file first as described in the Configuration section.
 
 ## Running the pipeline
 
