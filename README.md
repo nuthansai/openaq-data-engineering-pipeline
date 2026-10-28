@@ -191,6 +191,7 @@ docker compose up -d
 docker compose ps          # wait until postgres_main_openaq is healthy
 ```
 
+<<<<<<< HEAD
 Open the dashboard at http://localhost:8501 and pgAdmin at http://localhost:8085.
 
 > **A fresh database starts with tables but no data.** The incremental pipeline continues from data that already exists in PostgreSQL, so on an empty database it has nothing to continue from. The historical load scripts in `src/initial/` are not part of the Docker flow. Load the historical data first, then run the incremental pipeline.
@@ -278,11 +279,25 @@ docker compose up -d postgres_main_openaq
 With the Compose database, keep `DB_HOST=127.0.0.1` and `DB_PORT=5432` in `.env`.
 
 Install the project and its dependencies (runtime and dev) from the lock file:
+=======
+This project uses `uv` for dependency management and virtual environment setup.
+
+Install the project and its dependencies:
+
+```bash
+uv sync --group dev
+```
+
+This creates a managed virtual environment and installs the dependencies from `pyproject.toml`.
+
+If you want to activate the environment manually:
+>>>>>>> d287d8bee6c77da6cbdd7f779bbf07d82d064550
 
 ```bash
 uv sync
 ```
 
+<<<<<<< HEAD
 Run commands inside the managed environment:
 
 ```bash
@@ -295,7 +310,23 @@ If you use your own PostgreSQL instead, create the schema first:
 
 ```bash
 psql -U <user> -d <database> -f sql/create_tables.sql
+=======
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
 ```
+
+To run commands inside the project environment without activating it manually, use:
+
+```bash
+uv run python main.py
+uv run pytest tests/
+uv run streamlit run dashboard/app.py
+>>>>>>> d287d8bee6c77da6cbdd7f779bbf07d82d064550
+```
+
+The project uses the environment variables defined in `.env`; create that file first as described in the Configuration section.
 
 ## Running the pipeline
 
