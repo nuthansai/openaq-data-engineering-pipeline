@@ -1,10 +1,74 @@
-services:
+name: openaq
 
-  postgres:
-    image: postgres:15-alpine
+services:
+  open_aq_etl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: etl-runner
+    profiles: ["app"]
+    depends_on:
+      postgres_main_openaq:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres_main_openaq
+
+  open_aq_dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dashboard
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres_main_openaq
+
+  # Postgres container for DB integration tests (throwaway, no volume)
+  postgres_integration_test_openaq:
+    image: postgres:17
     environment:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: root
       POSTGRES_DB: practice_integration
     ports:
+      - "5433:5432"
+    profiles: ["test"]
+
+  # Postgres container for the main DB
+  postgres_main_openaq:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/create_tables.sql:/docker-entrypoint-initdb.d/create_tables.sql:ro
+    ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # pgAdmin for querying both databases
+  pgadmin_openaq:
+    image: dpage/pgadmin4
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: root
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "8085:80"
+
+volumes:
+  postgres_data:
+  pgadmin_data:

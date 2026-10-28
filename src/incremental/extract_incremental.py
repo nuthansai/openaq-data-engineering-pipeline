@@ -8,8 +8,9 @@ from dotenv import load_dotenv
 from sqlalchemy.exc import SQLAlchemyError, ArgumentError
 from typing_extensions import Any
 
+from src.config import DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, DB_NAME
 from src.config import BASE_URL, HEADER_JSON, DATA_DIR
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, URL
 
 load_dotenv()
 
@@ -18,7 +19,15 @@ logger = logging.getLogger(__name__)
 def extract_sql():
     """Queries PostgreSQL for max_date for active sensors and their latest ingested timestamps."""
 
-    engine = create_engine(f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}")
+    url = URL.create(
+        drivername="postgresql",
+        username=DB_USER,
+        password=DB_PASSWORD,
+        host=DB_HOST,
+        database=DB_NAME
+    )
+
+    engine = create_engine(url)
 
     with engine.begin() as conn:
         logger.info(">>> Connection established to PostgreSQL <<<")
